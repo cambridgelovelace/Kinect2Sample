@@ -12,6 +12,8 @@
 
 // Constructor
 Kinect::Kinect()
+    : got_background(false)
+    , n_bg_frames_captured(0)
 {
     // Initialize
     initialize();
@@ -173,15 +175,8 @@ inline void Kinect::updateDepth()
 // Draw Data
 void Kinect::draw()
 {
-#ifdef COLOR
-    // Draw Color
     drawColor();
-#endif
-
-#ifdef DEPTH
-    // Draw Depth
     drawDepth();
-#endif
 }
 
 // Draw Color
@@ -219,29 +214,29 @@ inline void Kinect::drawColor()
 // Draw Depth
 inline void Kinect::drawDepth()
 {
-    // Retrieve Mapped Coordinates
-    std::vector<DepthSpacePoint> depthSpacePoints( colorWidth * colorHeight );
-    ERROR_CHECK( coordinateMapper->MapColorFrameToDepthSpace( depthBuffer.size(), &depthBuffer[0], depthSpacePoints.size(), &depthSpacePoints[0] ) );
+    depthMat = cv::Mat(depthHeight, depthWidth, CV_16UC1, &depthBuffer[0]).clone();
 
-    // Mapping Depth to Color Resolution
-    std::vector<UINT16> buffer( colorWidth * colorHeight );
-
-    #pragma omp parallel for
-    for( int colorY = 0; colorY < colorHeight; colorY++ ){
-        unsigned int colorOffset = colorY * colorWidth;
-        for( int colorX = 0; colorX < colorWidth; colorX++ ){
-            unsigned int colorIndex = colorOffset + colorX;
-            int depthX = static_cast<int>( depthSpacePoints[colorIndex].X + 0.5f );
-            int depthY = static_cast<int>( depthSpacePoints[colorIndex].Y + 0.5f );
-            if( ( 0 <= depthX ) && ( depthX < depthWidth ) && ( 0 <= depthY ) && ( depthY < depthHeight ) ){
-                unsigned int depthIndex = depthY * depthWidth + depthX;
-                buffer[colorIndex] = depthBuffer[depthIndex];
-            }
+    if (!got_background)
+    {
+        if (n_bg_frames_captured == 0)
+            depthMat0 = depthMat.clone();
+        else {
+            cv::Mat av = 0.99 * depthMat0 + 0.01 * depthMat;
+            av.copyTo(depthMat0, (depthMat > 0) & (depthMat0 > 0)); // average where both known
+            depthMat.copyTo(depthMat0, depthMat0 == 0); // replace any unknown pixels
+        }
+        n_bg_frames_captured++;
+        if (n_bg_frames_captured > 50)
+        {
+            got_background = true;
+            // fill in the holes
+            cv::Mat infilled;
+            depthMat0.setTo(8000, depthMat0 == 0);
+            cv::erode(depthMat0, infilled, cv::Mat(), cv::Point(-1, -1), 10);
+            cv::dilate(infilled, infilled, cv::Mat(), cv::Point(-1, -1), 10);
+            infilled.copyTo(depthMat0, depthMat0 == 8000);
         }
     }
-
-    // Create cv::Mat from Coordinate Buffer
-    depthMat = cv::Mat( colorHeight, colorWidth, CV_16UC1, &buffer[0] ).clone();
 }
 
 // Show Data
@@ -265,8 +260,18 @@ inline void Kinect::showColor()
         return;
     }
 
+    if (got_background)
+    {
+        depthMat.setTo(9000, depthMat == 0); // put unknown depths to far away
+        cv::Mat mask = depthMat < (depthMat0 - 100); // only keep pixels nearer than the background
+        // remove speckle
+        cv::erode(mask, mask, cv::Mat(), cv::Point(-1, -1), 1);
+        cv::dilate(mask, mask, cv::Mat(), cv::Point(-1, -1), 1);
+        //cv::imshow("Color", colorMat);
+        colorMat.setTo(0, mask == 0);
+    }
     // Show Image
-    cv::imshow( "Color", colorMat );
+    cv::imshow("Color", colorMat);
 }
 
 // Show Depth

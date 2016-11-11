@@ -37,6 +37,10 @@ private:
     unsigned int depthBytesPerPixel;
     cv::Mat depthMat;
 
+    cv::Mat depthMat0, colorMat0;
+    bool got_background;
+    int n_bg_frames_captured;
+
 public:
     // Constructor
     Kinect();
