@@ -7,8 +7,9 @@
 #include <omp.h>
 
 Kinect::Kinect()
-    : got_background(false)
+    : got_depth_background(false)
     , n_bg_frames_captured(0)
+    , crop(250, 0, 1470, 1080)
 {
     initialize();
 }
@@ -147,6 +148,9 @@ void Kinect::draw()
 inline void Kinect::drawColor()
 {
     colorMat = cv::Mat( colorHeight, colorWidth, CV_8UC4, &colorBuffer[0] ).clone();
+
+    if (colorMat0.empty() && !colorMat.empty())
+        colorMat0 = colorMat.clone();
 }
 
 inline void Kinect::drawDepth()
@@ -176,7 +180,7 @@ inline void Kinect::drawDepth()
     depthMat = cv::Mat(colorHeight, colorWidth, CV_16UC1, &buffer[0]).clone();
 
     // Accumulate the static background depth. Assume the camera doesn't move and the scene doesn't move too much.
-    if (!got_background)
+    if (!got_depth_background)
     {
         if (n_bg_frames_captured == 0)
             depthMat0 = depthMat.clone();
@@ -188,7 +192,7 @@ inline void Kinect::drawDepth()
         n_bg_frames_captured++;
         if (n_bg_frames_captured > 100)
         {
-            got_background = true;
+            got_depth_background = true;
             // fill in the holes
             cv::Mat infilled;
             depthMat0.setTo(8000, depthMat0 == 0);
@@ -201,7 +205,7 @@ inline void Kinect::drawDepth()
 
 void Kinect::show()
 {
-    if (got_background)
+    if (got_depth_background)
         showColor();
     else
         showDepth();
@@ -209,22 +213,23 @@ void Kinect::show()
 
 inline void Kinect::showColor()
 {
-    if( colorMat.empty() || depthMat.empty() || depthMat0.empty() ){
+    if( colorMat.empty() || colorMat0.empty() || depthMat.empty() || depthMat0.empty() ){
         return;
     }
 
-    // mask out the background
+    // make a mask of the foreground
     depthMat.setTo(9000, depthMat == 0); // put unknown depths to far away
     cv::Mat mask = depthMat < (depthMat0 - 100); // only keep pixels nearer than the background
     // remove speckle
     cv::erode(mask, mask, cv::Mat(), cv::Point(-1, -1), 1);
-    //cv::dilate(mask, mask, cv::Mat(), cv::Point(-1, -1), 1);
-    colorMat.setTo(0, mask == 0);
 
-    cv::Mat scaledColor;
-    cv::resize(colorMat, scaledColor, cv::Size(), scale, scale);
+    // composite the scene
+    cv::Mat frame = colorMat0.clone();
+    colorMat.copyTo(frame, mask);
 
-    cv::imshow("Tango", scaledColor);
+    cv::resize(frame(crop), frame, cv::Size(), scale, scale);
+
+    cv::imshow("Tango", frame);
 }
 
 // Show Depth
@@ -239,7 +244,7 @@ inline void Kinect::showDepth()
     depthMat0.convertTo( scaleMat, CV_8U, -255.0 / 8000.0, 255.0 );
 
     cv::Mat scaled;
-    cv::resize(scaleMat, scaled, cv::Size(), scale, scale);
+    cv::resize(scaleMat(crop), scaled, cv::Size(), scale, scale);
 
     cv::imshow("Tango", scaled );
 }

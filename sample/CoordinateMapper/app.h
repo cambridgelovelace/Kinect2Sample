@@ -45,9 +45,11 @@ class Kinect
         cv::Mat depthMat;
 
         cv::Mat depthMat0, colorMat0;
-        bool got_background;
+        bool got_depth_background;
         int n_bg_frames_captured;
-        const double scale = 0.4;
+
+        const double scale = 0.6;
+        const cv::Rect crop;
 
     private:
 
