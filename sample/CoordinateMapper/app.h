@@ -20,6 +20,26 @@ class Kinect
         void run();
 
     private:
+
+        void initialize();
+        void initializeSensor();
+        void initializeColor();
+        void initializeDepth();
+
+        void finalize();
+
+        bool readImages();
+        bool readColor();
+        bool readDepth();
+
+        void accumulateBackground();
+        void compositeScene();
+
+        void render();
+
+        static void fillDepthHoles(cv::Mat& im, UINT16 minReliableDistance, UINT16 maxReliableDistance);
+
+    private:
         // Sensor
         ComPtr<IKinectSensor> kinect;
 
@@ -29,6 +49,8 @@ class Kinect
         // Reader
         ComPtr<IColorFrameReader> colorFrameReader;
         ComPtr<IDepthFrameReader> depthFrameReader;
+        UINT16 minReliableDistance;
+        UINT16 maxReliableDistance;
 
         // Color Buffer
         std::vector<BYTE> colorBuffer;
@@ -44,33 +66,16 @@ class Kinect
         unsigned int depthBytesPerPixel;
         cv::Mat depthMat;
 
-        cv::Mat depthMat0, colorMat0;
-        bool got_depth_background;
-        int n_bg_frames_captured;
+        // Video storage
+        static const size_t n_frames = 100;
+        cv::Mat depth_frames[n_frames];
+        cv::Mat color_frames[n_frames];
+        int iFrame;
 
-        const double scale = 0.6;
+        cv::Mat depthMat0;
+
+        const double scale = 0.7;
         const cv::Rect crop;
-
-    private:
-
-        void initialize();
-        inline void initializeSensor();
-        inline void initializeColor();
-        inline void initializeDepth();
-
-        void finalize();
-
-        void update();
-        inline void updateColor();
-        inline void updateDepth();
-
-        void draw();
-        inline void drawColor();
-        inline void drawDepth();
-
-        void show();
-        inline void showColor();
-        inline void showDepth();
 };
 
 #endif // __APP__

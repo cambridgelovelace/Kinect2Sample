@@ -7,9 +7,8 @@
 #include <omp.h>
 
 Kinect::Kinect()
-    : got_depth_background(false)
-    , n_bg_frames_captured(0)
-    , crop(250, 0, 1470, 1080)
+    : crop(240, 0, 1470, 1080)
+    , iFrame(0)
 {
     initialize();
 }
@@ -22,13 +21,22 @@ Kinect::~Kinect()
 void Kinect::run()
 {
     while( true ){
-        update();
-        draw();
-        show();
+        bool ret = readImages();
+        if (!ret) continue;
+        if (iFrame < n_frames)
+        {
+            accumulateBackground();
+        }
+        else
+        {
+            compositeScene();
+        }
+        render();
         const int key = cv::waitKey( 10 );
         if( key == VK_ESCAPE ){
             break;
         }
+        ++iFrame;
     }
 }
 
@@ -44,7 +52,7 @@ void Kinect::initialize()
     std::this_thread::sleep_for( std::chrono::seconds( 2 ) );
 }
 
-inline void Kinect::initializeSensor()
+void Kinect::initializeSensor()
 {
     // Open Sensor
     ERROR_CHECK( GetDefaultKinectSensor( &kinect ) );
@@ -61,7 +69,7 @@ inline void Kinect::initializeSensor()
     ERROR_CHECK( kinect->get_CoordinateMapper( &coordinateMapper ) );
 }
 
-inline void Kinect::initializeColor()
+void Kinect::initializeColor()
 {
     // Open Color Reader
     ComPtr<IColorFrameSource> colorFrameSource;
@@ -79,7 +87,7 @@ inline void Kinect::initializeColor()
     colorBuffer.resize( colorWidth * colorHeight * colorBytesPerPixel );
 }
 
-inline void Kinect::initializeDepth()
+void Kinect::initializeDepth()
 {
     // Open Depth Reader
     ComPtr<IDepthFrameSource> depthFrameSource;
@@ -92,6 +100,10 @@ inline void Kinect::initializeDepth()
     ERROR_CHECK( depthFrameDescription->get_Width( &depthWidth ) ); // 512
     ERROR_CHECK( depthFrameDescription->get_Height( &depthHeight ) ); // 424
     ERROR_CHECK( depthFrameDescription->get_BytesPerPixel( &depthBytesPerPixel ) ); // 2
+
+    // Retrieve Depth Reliable Range
+    ERROR_CHECK(depthFrameSource->get_DepthMinReliableDistance(&minReliableDistance)); // 500
+    ERROR_CHECK(depthFrameSource->get_DepthMaxReliableDistance(&maxReliableDistance)); // 4500
 
     // Allocation Depth Buffer
     depthBuffer.resize( depthWidth * depthHeight );
@@ -107,57 +119,47 @@ void Kinect::finalize()
     }
 }
 
-void Kinect::update()
+bool Kinect::readImages()
 {
-    updateColor();
-    updateDepth();
+    return readColor() && readDepth();
 }
 
-inline void Kinect::updateColor()
+bool Kinect::readColor()
 {
     // Retrieve Color Frame
     ComPtr<IColorFrame> colorFrame;
     const HRESULT ret = colorFrameReader->AcquireLatestFrame( &colorFrame );
     if( FAILED( ret ) ){
-        return;
+        return false;
     }
 
     // Convert Format ( YUY2 -> BGRA )
     ERROR_CHECK( colorFrame->CopyConvertedFrameDataToArray( static_cast<UINT>( colorBuffer.size() ), &colorBuffer[0], ColorImageFormat::ColorImageFormat_Bgra ) );
+
+    // copy into OpenCV storage
+    colorMat = cv::Mat(colorHeight, colorWidth, CV_8UC4, &colorBuffer[0]).clone();
+
+    // crop and downsize
+    cv::resize(colorMat(crop), colorMat, cv::Size(), scale, scale);
+
+    return !colorMat.empty();
 }
 
-inline void Kinect::updateDepth()
+bool Kinect::readDepth()
 {
     // Retrieve Depth Frame
     ComPtr<IDepthFrame> depthFrame;
-    const HRESULT ret = depthFrameReader->AcquireLatestFrame( &depthFrame );
-    if( FAILED( ret ) ){
-        return;
+    const HRESULT ret = depthFrameReader->AcquireLatestFrame(&depthFrame);
+    if (FAILED(ret)) {
+        return false;
     }
 
     // Retrieve Depth Data
-    ERROR_CHECK( depthFrame->CopyFrameDataToArray( static_cast<UINT>( depthBuffer.size() ), &depthBuffer[0] ) );
-}
+    ERROR_CHECK(depthFrame->CopyFrameDataToArray(static_cast<UINT>(depthBuffer.size()), &depthBuffer[0]));
 
-void Kinect::draw()
-{
-    drawColor();
-    drawDepth();
-}
-
-inline void Kinect::drawColor()
-{
-    colorMat = cv::Mat( colorHeight, colorWidth, CV_8UC4, &colorBuffer[0] ).clone();
-
-    if (colorMat0.empty() && !colorMat.empty())
-        colorMat0 = colorMat.clone();
-}
-
-inline void Kinect::drawDepth()
-{
     // Retrieve Mapped Coordinates
     std::vector<DepthSpacePoint> depthSpacePoints(colorWidth * colorHeight);
-    ERROR_CHECK(coordinateMapper->MapColorFrameToDepthSpace((UINT)depthBuffer.size(),&depthBuffer[0],(UINT)depthSpacePoints.size(),&depthSpacePoints[0]));
+    ERROR_CHECK(coordinateMapper->MapColorFrameToDepthSpace((UINT)depthBuffer.size(), &depthBuffer[0], (UINT)depthSpacePoints.size(), &depthSpacePoints[0]));
 
     // Mapping Depth to Color Resolution
     std::vector<UINT16> buffer(colorWidth * colorHeight);
@@ -179,72 +181,101 @@ inline void Kinect::drawDepth()
     // Create cv::Mat from Coordinate Buffer
     depthMat = cv::Mat(colorHeight, colorWidth, CV_16UC1, &buffer[0]).clone();
 
-    // Accumulate the static background depth. Assume the camera doesn't move and the scene doesn't move too much.
-    if (!got_depth_background)
-    {
-        if (n_bg_frames_captured == 0)
-            depthMat0 = depthMat.clone();
-        else {
-            cv::Mat av = 0.99 * depthMat0 + 0.01 * depthMat;
-            av.copyTo(depthMat0, (depthMat > 0) & (depthMat0 > 0)); // average where both known
-            depthMat.copyTo(depthMat0, depthMat0 == 0); // replace any unknown pixels
-        }
-        n_bg_frames_captured++;
-        if (n_bg_frames_captured > 100)
-        {
-            got_depth_background = true;
-            // fill in the holes
-            cv::Mat infilled;
-            depthMat0.setTo(8000, depthMat0 == 0);
-            cv::erode(depthMat0, infilled, cv::Mat(), cv::Point(-1, -1), 10);
-            cv::dilate(infilled, infilled, cv::Mat(), cv::Point(-1, -1), 10);
-            infilled.copyTo(depthMat0, depthMat0 == 8000);
-        }
+    // crop and downsize
+    cv::resize(depthMat(crop), depthMat, cv::Size(), scale, scale, cv::INTER_NEAREST);
+
+    return !depthMat.empty();
+}
+
+void Kinect::accumulateBackground()
+{
+    // Accumulate the static background depth. Assume the camera and the scene doesn't move too much.
+    if (depthMat0.empty())
+        depthMat0 = depthMat.clone();
+    else {
+        cv::Mat av = 0.99 * depthMat0 + 0.01 * depthMat;
+        cv::Mat valid_depth_mask = (depthMat > minReliableDistance) & (depthMat < maxReliableDistance);
+        cv::Mat valid_depth0_mask = (depthMat0 > minReliableDistance) & (depthMat0 < maxReliableDistance);
+        av.copyTo(depthMat0, valid_depth_mask & valid_depth0_mask); // average where both known
+        depthMat.copyTo(depthMat0, 255 - valid_depth0_mask); // replace any unknown pixels
+        depthMat0.setTo(maxReliableDistance * 2, (depthMat0 < minReliableDistance) | (depthMat0 > maxReliableDistance));
     }
+    if (iFrame == n_frames-1)
+    {
+        fillDepthHoles(depthMat0, minReliableDistance, maxReliableDistance);
+        // write into every frame of the video storage
+        for (int i = 0; i < n_frames; i++)
+            depth_frames[i] = depthMat0.clone();
+    }
+    color_frames[iFrame] = colorMat;
 }
 
-void Kinect::show()
+void Kinect::render()
 {
-    if (got_depth_background)
-        showColor();
-    else
-        showDepth();
-}
-
-inline void Kinect::showColor()
-{
-    if( colorMat.empty() || colorMat0.empty() || depthMat.empty() || depthMat0.empty() ){
+    if (false)
+    {
+        // DEBUG: show the live depth frame
+        cv::Mat im;
+        depthMat0.convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0] )
+        cv::imshow("Tango", im);
         return;
     }
+
+    if (iFrame < n_frames)
+    {
+        // show the depth buffer as it accumulates
+        cv::Mat im;
+        depthMat0.convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0] )
+        cv::imshow("Tango", im);
+    }
+    else
+    {
+        if (false)
+        {
+            // show the looping depth frames
+            cv::Mat im;
+            depth_frames[iFrame % n_frames].convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0] )
+            cv::imshow("Tango", im);
+        }
+        else {
+            // show the looping color images
+            cv::imshow("Tango", color_frames[iFrame % n_frames]);
+        }
+    }
+}
+
+void Kinect::compositeScene()
+{
+    // write into the scene if a pixel is closer
+    cv::Mat& depth_frame = depth_frames[iFrame % n_frames];
+    cv::Mat& color_frame = color_frames[iFrame % n_frames];
 
     // make a mask of the foreground
-    depthMat.setTo(9000, depthMat == 0); // put unknown depths to far away
-    cv::Mat mask = depthMat < (depthMat0 - 100); // only keep pixels nearer than the background
-    // remove speckle
-    cv::erode(mask, mask, cv::Mat(), cv::Point(-1, -1), 1);
+    depthMat.setTo(maxReliableDistance*2, (depthMat < minReliableDistance) | (depthMat > maxReliableDistance) );
+    const double depth_noise_mm = 100;
+    cv::Mat mask = depthMat < (depth_frame - depth_noise_mm); // only keep pixels nearer than the background
 
-    // composite the scene
-    cv::Mat frame = colorMat0.clone();
-    colorMat.copyTo(frame, mask);
-
-    cv::resize(frame(crop), frame, cv::Size(), scale, scale);
-
-    cv::imshow("Tango", frame);
-}
-
-// Show Depth
-inline void Kinect::showDepth()
-{
-    if( depthMat0.empty() ){
-        return;
+    if (false)
+    {
+        // attempt to remove speckle
+        cv::erode(mask, mask, cv::Mat(), cv::Point(-1, -1), 2);
+        cv::dilate(mask, mask, cv::Mat(), cv::Point(-1, -1), 2);
     }
 
-    // Scaling ( 0-8000 -> 255-0 )
-    cv::Mat scaleMat;
-    depthMat0.convertTo( scaleMat, CV_8U, -255.0 / 8000.0, 255.0 );
+    colorMat.copyTo(color_frame, mask);
+    depthMat.copyTo(depth_frame, mask);
+}
 
-    cv::Mat scaled;
-    cv::resize(scaleMat(crop), scaled, cv::Size(), scale, scale);
-
-    cv::imshow("Tango", scaled );
+// fills holes using a sophisticated interpolation algorithm - SLOW
+void Kinect::fillDepthHoles(cv::Mat& im, UINT16 minReliableDistance, UINT16 maxReliableDistance)
+{
+    cv::Mat holes_mask = (im < minReliableDistance) | (im > maxReliableDistance);
+    im.setTo(maxReliableDistance, holes_mask);
+    cv::Mat infilled;
+    // (inpaint needs CV_8UC1 or CV_8UC3 to work on)
+    infilled = 255.0 - 255.0 * (im - minReliableDistance) / (maxReliableDistance - minReliableDistance);
+    infilled.convertTo(infilled, CV_8U);
+    cv::inpaint(infilled, holes_mask, infilled, 20.0, cv::INPAINT_TELEA);
+    infilled.convertTo(im, CV_16UC1);
+    im = minReliableDistance + (maxReliableDistance - minReliableDistance) * (255.0 - im) / 255.0;
 }
