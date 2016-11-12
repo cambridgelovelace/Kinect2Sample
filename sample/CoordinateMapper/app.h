@@ -21,10 +21,11 @@ class Kinect
 
     private:
 
-        void initialize();
+        void initializeCapture();
         void initializeSensor();
         void initializeColor();
         void initializeDepth();
+        void initializeVideoWriter();
 
         void finalize();
 
@@ -52,12 +53,16 @@ class Kinect
         UINT16 minReliableDistance;
         UINT16 maxReliableDistance;
 
+        // Video Writer
+        cv::VideoWriter video_writer;
+
         // Color Buffer
         std::vector<BYTE> colorBuffer;
         int colorWidth;
         int colorHeight;
         unsigned int colorBytesPerPixel;
         cv::Mat colorMat;
+        cv::Size colorMatSize;
 
         // Depth Buffer
         std::vector<UINT16> depthBuffer;
@@ -67,14 +72,14 @@ class Kinect
         cv::Mat depthMat;
 
         // Video storage
-        static const size_t n_frames = 100;
+        static const size_t n_frames = 60;
         cv::Mat depth_frames[n_frames];
         cv::Mat color_frames[n_frames];
         int iFrame;
 
         cv::Mat depthMat0;
 
-        const double scale = 0.7;
+        const double scale = 0.6;
         const cv::Rect crop;
 };
 

@@ -10,7 +10,8 @@ Kinect::Kinect()
     : crop(240, 0, 1470, 1080)
     , iFrame(0)
 {
-    initialize();
+    initializeCapture();
+    initializeVideoWriter();
 }
 
 Kinect::~Kinect()
@@ -40,7 +41,7 @@ void Kinect::run()
     }
 }
 
-void Kinect::initialize()
+void Kinect::initializeCapture()
 {
     cv::setUseOptimized( true );
 
@@ -85,6 +86,12 @@ void Kinect::initializeColor()
 
     // Allocation Color Buffer
     colorBuffer.resize( colorWidth * colorHeight * colorBytesPerPixel );
+
+    int w = (int)(colorWidth * scale);
+    int h = (int)(colorHeight * scale);
+    w -= w % 4; // video width must be multiple of 4
+    h -= h % 2; // video height must be multiple of 2
+    colorMatSize = cv::Size(w, h);
 }
 
 void Kinect::initializeDepth()
@@ -107,6 +114,11 @@ void Kinect::initializeDepth()
 
     // Allocation Depth Buffer
     depthBuffer.resize( depthWidth * depthHeight );
+}
+
+void Kinect::initializeVideoWriter()
+{
+    video_writer.open("output.avi", cv::VideoWriter::fourcc('M', 'S', 'V', 'C'), 15.0, colorMatSize); //cv::VideoWriter::fourcc('X', '2', '6', '4'), 15.0, colorMatSize);
 }
 
 void Kinect::finalize()
@@ -140,7 +152,10 @@ bool Kinect::readColor()
     colorMat = cv::Mat(colorHeight, colorWidth, CV_8UC4, &colorBuffer[0]).clone();
 
     // crop and downsize
-    cv::resize(colorMat(crop), colorMat, cv::Size(), scale, scale);
+    cv::resize(colorMat(crop), colorMat, colorMatSize);
+
+    // mirror
+    cv::flip(colorMat, colorMat, 1);
 
     return !colorMat.empty();
 }
@@ -182,7 +197,10 @@ bool Kinect::readDepth()
     depthMat = cv::Mat(colorHeight, colorWidth, CV_16UC1, &buffer[0]).clone();
 
     // crop and downsize
-    cv::resize(depthMat(crop), depthMat, cv::Size(), scale, scale, cv::INTER_NEAREST);
+    cv::resize(depthMat(crop), depthMat, colorMatSize, 0, 0, cv::INTER_NEAREST);
+
+    // mirror
+    cv::flip(depthMat, depthMat, 1);
 
     return !depthMat.empty();
 }
@@ -214,9 +232,9 @@ void Kinect::render()
 {
     if (false)
     {
-        // DEBUG: show the live depth frame
+        // DEBUG: show the depth
         cv::Mat im;
-        depthMat0.convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0] )
+        depthMat0.convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0]
         cv::imshow("Tango", im);
         return;
     }
@@ -225,7 +243,7 @@ void Kinect::render()
     {
         // show the depth buffer as it accumulates
         cv::Mat im;
-        depthMat0.convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0] )
+        depthMat0.convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0]
         cv::imshow("Tango", im);
     }
     else
@@ -234,12 +252,14 @@ void Kinect::render()
         {
             // show the looping depth frames
             cv::Mat im;
-            depth_frames[iFrame % n_frames].convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0] )
+            depth_frames[iFrame % n_frames].convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0]
             cv::imshow("Tango", im);
         }
-        else {
+        else 
+        {
             // show the looping color images
             cv::imshow("Tango", color_frames[iFrame % n_frames]);
+            video_writer.write(color_frames[iFrame % n_frames]);
         }
     }
 }
