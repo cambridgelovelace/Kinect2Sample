@@ -1,3 +1,11 @@
+Please note: this is a modified version, for a specific purpose.
+
+You probably want this repo instead: https://github.com/UnaNancyOwen/Kinect2Sample
+
+Original notes below.
+
+--------
+
 
 Kinect for Windows SDK v2 Sample Program
 ============================
