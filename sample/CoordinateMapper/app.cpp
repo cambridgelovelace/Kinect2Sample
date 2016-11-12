@@ -6,41 +6,24 @@
 
 #include <omp.h>
 
-// Choose Streams
-#define COLOR
-//#define DEPTH
-
-// Constructor
 Kinect::Kinect()
     : got_background(false)
     , n_bg_frames_captured(0)
 {
-    // Initialize
     initialize();
 }
 
-// Destructor
 Kinect::~Kinect()
 {
-    // Finalize
     finalize();
 }
 
-// Processing
 void Kinect::run()
 {
-    // Main Loop
     while( true ){
-        // Update Data
         update();
-
-        // Draw Data
         draw();
-
-        // Show Data
         show();
-
-        // Key Check
         const int key = cv::waitKey( 10 );
         if( key == VK_ESCAPE ){
             break;
@@ -48,30 +31,22 @@ void Kinect::run()
     }
 }
 
-// Initialize
 void Kinect::initialize()
 {
     cv::setUseOptimized( true );
 
-    // Initialize Sensor
     initializeSensor();
-
-    // Initialize Color
     initializeColor();
-
-    // Initialize Depth
     initializeDepth();
 
     // Wait a Few Seconds until begins to Retrieve Data from Sensor ( about 2000-[ms] )
     std::this_thread::sleep_for( std::chrono::seconds( 2 ) );
 }
 
-// Initialize Sensor
 inline void Kinect::initializeSensor()
 {
     // Open Sensor
     ERROR_CHECK( GetDefaultKinectSensor( &kinect ) );
-
     ERROR_CHECK( kinect->Open() );
 
     // Check Open
@@ -85,7 +60,6 @@ inline void Kinect::initializeSensor()
     ERROR_CHECK( kinect->get_CoordinateMapper( &coordinateMapper ) );
 }
 
-// Initialize Color
 inline void Kinect::initializeColor()
 {
     // Open Color Reader
@@ -104,7 +78,6 @@ inline void Kinect::initializeColor()
     colorBuffer.resize( colorWidth * colorHeight * colorBytesPerPixel );
 }
 
-// Initialize Depth
 inline void Kinect::initializeDepth()
 {
     // Open Depth Reader
@@ -123,7 +96,6 @@ inline void Kinect::initializeDepth()
     depthBuffer.resize( depthWidth * depthHeight );
 }
 
-// Finalize
 void Kinect::finalize()
 {
     cv::destroyAllWindows();
@@ -134,17 +106,12 @@ void Kinect::finalize()
     }
 }
 
-// Update Data
 void Kinect::update()
 {
-    // Update Color
     updateColor();
-
-    // Update Depth
     updateDepth();
 }
 
-// Update Color
 inline void Kinect::updateColor()
 {
     // Retrieve Color Frame
@@ -158,7 +125,6 @@ inline void Kinect::updateColor()
     ERROR_CHECK( colorFrame->CopyConvertedFrameDataToArray( static_cast<UINT>( colorBuffer.size() ), &colorBuffer[0], ColorImageFormat::ColorImageFormat_Bgra ) );
 }
 
-// Update Depth
 inline void Kinect::updateDepth()
 {
     // Retrieve Depth Frame
@@ -172,50 +138,44 @@ inline void Kinect::updateDepth()
     ERROR_CHECK( depthFrame->CopyFrameDataToArray( static_cast<UINT>( depthBuffer.size() ), &depthBuffer[0] ) );
 }
 
-// Draw Data
 void Kinect::draw()
 {
     drawColor();
     drawDepth();
 }
 
-// Draw Color
 inline void Kinect::drawColor()
 {
-    // Retrieve Mapped Coordinates
-    std::vector<ColorSpacePoint> colorSpacePoints( depthWidth * depthHeight );
-    ERROR_CHECK( coordinateMapper->MapDepthFrameToColorSpace( depthBuffer.size(), &depthBuffer[0], colorSpacePoints.size(), &colorSpacePoints[0] ) );
+    colorMat = cv::Mat( colorHeight, colorWidth, CV_8UC4, &colorBuffer[0] ).clone();
+}
 
-    // Mapping Color to Depth Resolution
-    std::vector<BYTE> buffer( depthWidth * depthHeight * colorBytesPerPixel );
+inline void Kinect::drawDepth()
+{
+    // Retrieve Mapped Coordinates
+    std::vector<DepthSpacePoint> depthSpacePoints(colorWidth * colorHeight);
+    ERROR_CHECK(coordinateMapper->MapColorFrameToDepthSpace((UINT)depthBuffer.size(),&depthBuffer[0],(UINT)depthSpacePoints.size(),&depthSpacePoints[0]));
+
+    // Mapping Depth to Color Resolution
+    std::vector<UINT16> buffer(colorWidth * colorHeight);
 
     #pragma omp parallel for
-    for( int depthY = 0; depthY < depthHeight; depthY++ ){
-        unsigned int depthOffset = depthY * depthWidth;
-        for( int depthX = 0; depthX < depthWidth; depthX++ ){
-            unsigned int depthIndex = depthOffset + depthX;
-            int colorX = static_cast<int>( colorSpacePoints[depthIndex].X + 0.5f );
-            int colorY = static_cast<int>( colorSpacePoints[depthIndex].Y + 0.5f );
-            if( ( 0 <= colorX ) && ( colorX < colorWidth ) && ( 0 <= colorY ) && ( colorY < colorHeight ) ){
-                unsigned int colorIndex = ( colorY * colorWidth + colorX ) * colorBytesPerPixel;
-                depthIndex = depthIndex * colorBytesPerPixel;
-                buffer[depthIndex + 0] = colorBuffer[colorIndex + 0];
-                buffer[depthIndex + 1] = colorBuffer[colorIndex + 1];
-                buffer[depthIndex + 2] = colorBuffer[colorIndex + 2];
-                buffer[depthIndex + 3] = colorBuffer[colorIndex + 3];
+    for (int colorY = 0; colorY < colorHeight; colorY++) {
+        unsigned int colorOffset = colorY * colorWidth;
+        for (int colorX = 0; colorX < colorWidth; colorX++) {
+            unsigned int colorIndex = colorOffset + colorX;
+            int depthX = static_cast<int>(depthSpacePoints[colorIndex].X + 0.5f);
+            int depthY = static_cast<int>(depthSpacePoints[colorIndex].Y + 0.5f);
+            if ((0 <= depthX) && (depthX < depthWidth) && (0 <= depthY) && (depthY < depthHeight)) {
+                unsigned int depthIndex = depthY * depthWidth + depthX;
+                buffer[colorIndex] = depthBuffer[depthIndex];
             }
         }
     }
 
     // Create cv::Mat from Coordinate Buffer
-    colorMat = cv::Mat( depthHeight, depthWidth, CV_8UC4, &buffer[0] ).clone();
-}
+    depthMat = cv::Mat(colorHeight, colorWidth, CV_16UC1, &buffer[0]).clone();
 
-// Draw Depth
-inline void Kinect::drawDepth()
-{
-    depthMat = cv::Mat(depthHeight, depthWidth, CV_16UC1, &depthBuffer[0]).clone();
-
+    // Accumulate the static background depth. Assume the camera doesn't move and the scene doesn't move too much.
     if (!got_background)
     {
         if (n_bg_frames_captured == 0)
@@ -226,7 +186,7 @@ inline void Kinect::drawDepth()
             depthMat.copyTo(depthMat0, depthMat0 == 0); // replace any unknown pixels
         }
         n_bg_frames_captured++;
-        if (n_bg_frames_captured > 50)
+        if (n_bg_frames_captured > 100)
         {
             got_background = true;
             // fill in the holes
@@ -239,58 +199,47 @@ inline void Kinect::drawDepth()
     }
 }
 
-// Show Data
 void Kinect::show()
 {
-#ifdef COLOR
-    // Show Color
-    showColor();
-#endif
-
-#ifdef DEPTH
-    // Show Depth
-    showDepth();
-#endif
+    if (got_background)
+        showColor();
+    else
+        showDepth();
 }
 
-// Show Color
 inline void Kinect::showColor()
 {
-    if( colorMat.empty() ){
+    if( colorMat.empty() || depthMat.empty() || depthMat0.empty() ){
         return;
     }
 
-    if (got_background)
-    {
-        depthMat.setTo(9000, depthMat == 0); // put unknown depths to far away
-        cv::Mat mask = depthMat < (depthMat0 - 100); // only keep pixels nearer than the background
-        // remove speckle
-        cv::erode(mask, mask, cv::Mat(), cv::Point(-1, -1), 1);
-        cv::dilate(mask, mask, cv::Mat(), cv::Point(-1, -1), 1);
-        //cv::imshow("Color", colorMat);
-        colorMat.setTo(0, mask == 0);
-    }
-    // Show Image
-    cv::imshow("Color", colorMat);
+    // mask out the background
+    depthMat.setTo(9000, depthMat == 0); // put unknown depths to far away
+    cv::Mat mask = depthMat < (depthMat0 - 100); // only keep pixels nearer than the background
+    // remove speckle
+    cv::erode(mask, mask, cv::Mat(), cv::Point(-1, -1), 1);
+    //cv::dilate(mask, mask, cv::Mat(), cv::Point(-1, -1), 1);
+    colorMat.setTo(0, mask == 0);
+
+    cv::Mat scaledColor;
+    cv::resize(colorMat, scaledColor, cv::Size(), scale, scale);
+
+    cv::imshow("Tango", scaledColor);
 }
 
 // Show Depth
 inline void Kinect::showDepth()
 {
-    if( depthMat.empty() ){
+    if( depthMat0.empty() ){
         return;
     }
 
     // Scaling ( 0-8000 -> 255-0 )
     cv::Mat scaleMat;
-    depthMat.convertTo( scaleMat, CV_8U, -255.0 / 8000.0, 255.0 );
-    //cv::applyColorMap( scaleMat, scaleMat, cv::COLORMAP_BONE );
+    depthMat0.convertTo( scaleMat, CV_8U, -255.0 / 8000.0, 255.0 );
 
-    // Resize Image
-    cv::Mat resizeMat;
-    const double scale = 0.5;
-    cv::resize( scaleMat, resizeMat, cv::Size(), scale, scale );
+    cv::Mat scaled;
+    cv::resize(scaleMat, scaled, cv::Size(), scale, scale);
 
-    // Show Image
-    cv::imshow( "Depth", resizeMat );
+    cv::imshow("Tango", scaled );
 }

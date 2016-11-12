@@ -12,87 +12,63 @@ using namespace Microsoft::WRL;
 
 class Kinect
 {
-private:
-    // Sensor
-    ComPtr<IKinectSensor> kinect;
+    public:
 
-    // Coordinate Mapper
-    ComPtr<ICoordinateMapper> coordinateMapper;
+        Kinect();
+        ~Kinect();
 
-    // Reader
-    ComPtr<IColorFrameReader> colorFrameReader;
-    ComPtr<IDepthFrameReader> depthFrameReader;
+        void run();
 
-    // Color Buffer
-    std::vector<BYTE> colorBuffer;
-    int colorWidth;
-    int colorHeight;
-    unsigned int colorBytesPerPixel;
-    cv::Mat colorMat;
+    private:
+        // Sensor
+        ComPtr<IKinectSensor> kinect;
 
-    // Depth Buffer
-    std::vector<UINT16> depthBuffer;
-    int depthWidth;
-    int depthHeight;
-    unsigned int depthBytesPerPixel;
-    cv::Mat depthMat;
+        // Coordinate Mapper
+        ComPtr<ICoordinateMapper> coordinateMapper;
 
-    cv::Mat depthMat0, colorMat0;
-    bool got_background;
-    int n_bg_frames_captured;
+        // Reader
+        ComPtr<IColorFrameReader> colorFrameReader;
+        ComPtr<IDepthFrameReader> depthFrameReader;
 
-public:
-    // Constructor
-    Kinect();
+        // Color Buffer
+        std::vector<BYTE> colorBuffer;
+        int colorWidth;
+        int colorHeight;
+        unsigned int colorBytesPerPixel;
+        cv::Mat colorMat;
 
-    // Destructor
-    ~Kinect();
+        // Depth Buffer
+        std::vector<UINT16> depthBuffer;
+        int depthWidth;
+        int depthHeight;
+        unsigned int depthBytesPerPixel;
+        cv::Mat depthMat;
 
-    // Processing
-    void run();
+        cv::Mat depthMat0, colorMat0;
+        bool got_background;
+        int n_bg_frames_captured;
+        const double scale = 0.4;
 
-private:
-    // Initialize
-    void initialize();
+    private:
 
-    // Initialize Sensor
-    inline void initializeSensor();
+        void initialize();
+        inline void initializeSensor();
+        inline void initializeColor();
+        inline void initializeDepth();
 
-    // Initialize Color
-    inline void initializeColor();
+        void finalize();
 
-    // Initialize Depth
-    inline void initializeDepth();
+        void update();
+        inline void updateColor();
+        inline void updateDepth();
 
-    // Finalize
-    void finalize();
+        void draw();
+        inline void drawColor();
+        inline void drawDepth();
 
-    // Update Data
-    void update();
-
-    // Update Color
-    inline void updateColor();
-
-    // Update Depth
-    inline void updateDepth();
-
-    // Draw Data
-    void draw();
-
-    // Draw Color
-    inline void drawColor();
-
-    // Draw Depth
-    inline void drawDepth();
-
-    // Show Data
-    void show();
-
-    // Show Color
-    inline void showColor();
-
-    // Show Depth
-    inline void showDepth();
+        void show();
+        inline void showColor();
+        inline void showDepth();
 };
 
 #endif // __APP__
