@@ -1,6 +1,13 @@
-Please note: this is a modified version, for a specific purpose.
+Please note: this is a modified version, for a specific purpose. You probably want this repo instead: https://github.com/UnaNancyOwen/Kinect2Sample
 
-You probably want this repo instead: https://github.com/UnaNancyOwen/Kinect2Sample
+Have you seen the short film Tango?
+https://vimeo.com/38580206
+
+Now you can make your own, using a Kinect2 sensor! Just set the CoordinateMapper sample running and move around in front of the Kinect.
+
+Here's an example of what it can produce: https://youtu.be/zIAdXue8X4s 
+
+Come and make your own films with it at our John Wallis workshop, on November 27th 2016: http://www.cambridgelovelace.org/
 
 Original notes below.
 
