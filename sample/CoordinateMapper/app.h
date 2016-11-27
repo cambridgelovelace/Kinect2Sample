@@ -81,6 +81,8 @@ class Kinect
 
         const double scale = 0.6;
         const cv::Rect crop;
+
+        std::string window_title;
 };
 
 #endif // __APP__

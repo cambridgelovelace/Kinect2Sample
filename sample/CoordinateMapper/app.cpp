@@ -1,14 +1,17 @@
 #include "app.h"
 #include "util.h"
 
+#include <iomanip>
 #include <thread>
 #include <chrono>
+#include <sys/stat.h>
 
 #include <omp.h>
 
 Kinect::Kinect()
     : crop(240, 0, 1470, 1080)
     , iFrame(0)
+    , window_title("Tango")
 {
     initializeCapture();
     initializeVideoWriter();
@@ -21,7 +24,8 @@ Kinect::~Kinect()
 
 void Kinect::run()
 {
-    while( true ){
+    while( true )
+    {
         bool ret = readImages();
         if (!ret) continue;
         if (iFrame < n_frames)
@@ -34,7 +38,8 @@ void Kinect::run()
         }
         render();
         const int key = cv::waitKey( 10 );
-        if( key == VK_ESCAPE ){
+        if( key == VK_ESCAPE )
+        {
             break;
         }
         ++iFrame;
@@ -116,9 +121,34 @@ void Kinect::initializeDepth()
     depthBuffer.resize( depthWidth * depthHeight );
 }
 
+bool fileExists(const std::string& filename)
+{
+    struct stat buf;
+    if (stat(filename.c_str(), &buf) != -1)
+    {
+        return true;
+    }
+    return false;
+}
+
 void Kinect::initializeVideoWriter()
 {
-    video_writer.open("output.avi", cv::VideoWriter::fourcc('M', 'S', 'V', 'C'), 15.0, colorMatSize); //cv::VideoWriter::fourcc('X', '2', '6', '4'), 15.0, colorMatSize);
+    const int fourcc = cv::VideoWriter::fourcc('M', 'S', 'V', 'C');
+    //fourcc = cv::VideoWriter::fourcc('X', '2', '6', '4');
+
+    std::string filename;
+    int i_suffix = 1;
+    do {
+        std::ostringstream oss;
+        oss << "output_" << std::setfill('0') << std::setw(4) << i_suffix << ".avi";
+        filename = oss.str();
+        i_suffix++;
+    } while (fileExists(filename));
+    video_writer.open(filename.c_str(), fourcc, 15.0, colorMatSize); 
+
+    std::ostringstream oss;
+    oss << "Writing to " << filename << "... Hit Esc to stop.";
+    window_title = filename;
 }
 
 void Kinect::finalize()
@@ -235,7 +265,7 @@ void Kinect::render()
         // DEBUG: show the depth
         cv::Mat im;
         depthMat0.convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0]
-        cv::imshow("Tango", im);
+        cv::imshow(window_title.c_str() , im);
         return;
     }
 
@@ -244,7 +274,7 @@ void Kinect::render()
         // show the depth buffer as it accumulates
         cv::Mat im;
         depthMat0.convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0]
-        cv::imshow("Tango", im);
+        cv::imshow(window_title, im);
     }
     else
     {
@@ -253,12 +283,12 @@ void Kinect::render()
             // show the looping depth frames
             cv::Mat im;
             depth_frames[iFrame % n_frames].convertTo(im, CV_8U, -255.0 / 8000.0, 255.0);  //  [0,8000] -> [255,0]
-            cv::imshow("Tango", im);
+            cv::imshow(window_title, im);
         }
         else 
         {
             // show the looping color images
-            cv::imshow("Tango", color_frames[iFrame % n_frames]);
+            cv::imshow(window_title, color_frames[iFrame % n_frames]);
             video_writer.write(color_frames[iFrame % n_frames]);
         }
     }
