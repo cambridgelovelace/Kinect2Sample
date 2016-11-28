@@ -148,7 +148,7 @@ void Kinect::initializeVideoWriter()
 
     std::ostringstream oss;
     oss << "Writing to " << filename << "... Hit Esc to stop.";
-    window_title = filename;
+    window_title = oss.str();
 }
 
 void Kinect::finalize()
